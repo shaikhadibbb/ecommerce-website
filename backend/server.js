@@ -1,83 +1,47 @@
-const express = require("express");
-const Joi = require("joi");
-const cors = require("cors");
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+
+const productRoutes = require('./routes/products');
+const userRoutes = require('./routes/users');
+const cartRoutes = require('./routes/cart');
+const orderRoutes = require('./routes/orders');
+
+const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 const app = express();
+const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// ── Security & Utility Middleware ─────────────────────────────────────────────
+app.use(helmet());
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
+app.use(morgan('dev'));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Middleware logger
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
+// ── Request Logger Middleware ─────────────────────────────────────────────────
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// Fake database
-let products = [
-  { id: 1, name: "Watch", price: 2499 },
-  { id: 2, name: "Shoes", price: 4999 }
-];
-
-let users = [];
-let cart = [];
-let orders = [];
-
-// Validation schemas
-const userSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(3).required()
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({ message: 'VELVET API is running', version: '1.0.0' });
 });
 
-const cartSchema = Joi.object({
-  productId: Joi.number().required(),
-  qty: Joi.number().required()
+app.use('/api/products', productRoutes);
+app.use('/api/users',    userRoutes);
+app.use('/api/cart',     cartRoutes);
+app.use('/api/orders',   orderRoutes);
+
+// ── Error Handling ────────────────────────────────────────────────────────────
+app.use(notFound);
+app.use(errorHandler);
+
+app.listen(PORT, () => {
+  console.log(`✅  VELVET API running on http://localhost:${PORT}`);
 });
 
-// PRODUCTS API
-app.get("/products", (req, res) => {
-  res.json(products);
-});
-
-// USERS API
-app.post("/users", (req, res, next) => {
-  const { error } = userSchema.validate(req.body);
-  if (error) return next(error);
-
-  users.push(req.body);
-  res.send("User added");
-});
-
-// CART API
-app.post("/cart", (req, res, next) => {
-  const { error } = cartSchema.validate(req.body);
-  if (error) return next(error);
-
-  cart.push(req.body);
-  res.send("Added to cart");
-});
-
-app.get("/cart", (req, res) => {
-  res.json(cart);
-});
-
-// ORDERS API
-app.post("/orders", (req, res) => {
-  orders.push(cart);
-  cart = [];
-  res.send("Order placed");
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  res.status(400).json({
-    message: err.details
-      ? err.details[0].message
-      : err.message
-  });
-});
-
-// Start server
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
-});
+module.exports = app;
