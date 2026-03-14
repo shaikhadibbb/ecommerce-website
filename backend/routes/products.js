@@ -1,67 +1,62 @@
-const express = require('express');
-const router  = express.Router();
-const { validateProduct } = require('../middleware/validate');
-const { createError }     = require('../middleware/errorHandler');
+const express  = require('express');
+const router   = express.Router();
+const Product  = require('../models/Product');
+const { createError } = require('../middleware/errorHandler');
 
-// In-memory store (replace with DB later)
-let products = [
-  { id: '1', name: 'Silk Noir Blazer',     price: 8999,  category: 'clothing',     stock: 10, description: 'Premium silk blazer in classic noir.' },
-  { id: '2', name: 'Velvet Clutch Bag',    price: 4599,  category: 'accessories',  stock: 25, description: 'Evening clutch in plush velvet.' },
-  { id: '3', name: 'Gold Leaf Pendant',    price: 3299,  category: 'jewellery',    stock: 15, description: '18k gold-plated leaf pendant.' },
-];
+// GET /api/products
+router.get('/', async (req, res, next) => {
+  try {
+    const { category, minPrice, maxPrice, search } = req.query;
+    const filter = { isActive: true };
 
-// ── GET /api/products ─────────────────────────────────────────────────────────
-router.get('/', (req, res) => {
-  const { category, minPrice, maxPrice, search } = req.query;
-  let result = [...products];
+    if (category)  filter.category = category;
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+    if (search) filter.name = { $regex: search, $options: 'i' };
 
-  if (category) result = result.filter(p => p.category === category);
-  if (minPrice)  result = result.filter(p => p.price >= Number(minPrice));
-  if (maxPrice)  result = result.filter(p => p.price <= Number(maxPrice));
-  if (search)    result = result.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()));
-
-  res.json({ success: true, count: result.length, data: result });
+    const products = await Product.find(filter).sort({ createdAt: -1 });
+    res.json({ success: true, count: products.length, data: products });
+  } catch (err) { next(err); }
 });
 
-// ── GET /api/products/:id ─────────────────────────────────────────────────────
-router.get('/:id', (req, res, next) => {
-  const product = products.find(p => p.id === req.params.id);
-  if (!product) return next(createError('Product not found', 404));
-  res.json({ success: true, data: product });
+// GET /api/products/:id
+router.get('/:id', async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return next(createError('Product not found', 404));
+    res.json({ success: true, data: product });
+  } catch (err) { next(err); }
 });
 
-// ── POST /api/products ────────────────────────────────────────────────────────
-router.post('/', validateProduct, (req, res) => {
-  const { name, price, description, category, stock } = req.body;
-  const newProduct = {
-    id: String(Date.now()),
-    name,
-    price: parseFloat(price),
-    description: description || '',
-    category,
-    stock: parseInt(stock) || 0,
-  };
-  products.push(newProduct);
-  res.status(201).json({ success: true, data: newProduct });
+// POST /api/products
+router.post('/', async (req, res, next) => {
+  try {
+    const product = await Product.create(req.body);
+    res.status(201).json({ success: true, data: product });
+  } catch (err) { next(err); }
 });
 
-// ── PUT /api/products/:id ─────────────────────────────────────────────────────
-router.put('/:id', (req, res, next) => {
-  const index = products.findIndex(p => p.id === req.params.id);
-  if (index === -1) return next(createError('Product not found', 404));
-
-  products[index] = { ...products[index], ...req.body, id: req.params.id };
-  res.json({ success: true, data: products[index] });
+// PUT /api/products/:id
+router.put('/:id', async (req, res, next) => {
+  try {
+    const product = await Product.findByIdAndUpdate(
+      req.params.id, req.body, { new: true, runValidators: true }
+    );
+    if (!product) return next(createError('Product not found', 404));
+    res.json({ success: true, data: product });
+  } catch (err) { next(err); }
 });
 
-// ── DELETE /api/products/:id ──────────────────────────────────────────────────
-router.delete('/:id', (req, res, next) => {
-  const index = products.findIndex(p => p.id === req.params.id);
-  if (index === -1) return next(createError('Product not found', 404));
-
-  products.splice(index, 1);
-  res.json({ success: true, message: 'Product deleted successfully' });
+// DELETE /api/products/:id
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+    if (!product) return next(createError('Product not found', 404));
+    res.json({ success: true, message: 'Product deleted' });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

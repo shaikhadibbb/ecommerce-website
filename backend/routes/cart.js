@@ -1,85 +1,81 @@
 const express = require('express');
 const router  = express.Router();
-const { validateCartItem } = require('../middleware/validate');
-const { createError }      = require('../middleware/errorHandler');
+const Cart    = require('../models/Cart');
+const { createError } = require('../middleware/errorHandler');
 
-// In-memory cart store: { userId -> [{ productId, name, price, quantity }] }
-const carts = {};
-
-const getCart = (userId) => carts[userId] || [];
-
-// ── GET /api/cart/:userId ─────────────────────────────────────────────────────
-router.get('/:userId', (req, res) => {
-  const cart  = getCart(req.params.userId);
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  res.json({ success: true, data: cart, total: parseFloat(total.toFixed(2)) });
+// GET /api/cart/:userId
+router.get('/:userId', async (req, res, next) => {
+  try {
+    const cart = await Cart.findOne({ user: req.params.userId })
+      .populate('items.product', 'name price image');
+    if (!cart) return res.json({ success: true, data: { items: [], total: 0 } });
+    res.json({ success: true, data: cart });
+  } catch (err) { next(err); }
 });
 
-// ── POST /api/cart/:userId ────────────────────────────────────────────────────
-router.post('/:userId', validateCartItem, (req, res, next) => {
-  const { userId } = req.params;
-  const { productId, name, price, quantity } = req.body;
+// POST /api/cart/:userId — add item
+router.post('/:userId', async (req, res, next) => {
+  try {
+    const { productId, name, price, quantity = 1 } = req.body;
+    if (!productId || !price) return next(createError('productId and price required', 400));
 
-  if (!carts[userId]) carts[userId] = [];
+    let cart = await Cart.findOne({ user: req.params.userId });
+    if (!cart) cart = new Cart({ user: req.params.userId, items: [] });
 
-  const existingIndex = carts[userId].findIndex(i => i.productId === productId);
+    const existing = cart.items.find(i => i.product.toString() === productId);
+    if (existing) {
+      existing.quantity += Number(quantity);
+    } else {
+      cart.items.push({ product: productId, name, price: Number(price), quantity: Number(quantity) });
+    }
 
-  if (existingIndex >= 0) {
-    carts[userId][existingIndex].quantity += parseInt(quantity);
-  } else {
-    carts[userId].push({
-      productId,
-      name:     name     || 'Unknown Product',
-      price:    parseFloat(price) || 0,
-      quantity: parseInt(quantity),
-    });
-  }
-
-  const total = carts[userId].reduce((s, i) => s + i.price * i.quantity, 0);
-  res.status(201).json({
-    success: true,
-    data:    carts[userId],
-    total:   parseFloat(total.toFixed(2)),
-  });
+    await cart.save();
+    res.status(201).json({ success: true, data: cart });
+  } catch (err) { next(err); }
 });
 
-// ── PUT /api/cart/:userId/:productId ─────────────────────────────────────────
-router.put('/:userId/:productId', (req, res, next) => {
-  const { userId, productId } = req.params;
-  const { quantity } = req.body;
+// PUT /api/cart/:userId/:productId — update quantity
+router.put('/:userId/:productId', async (req, res, next) => {
+  try {
+    const { quantity } = req.body;
+    const cart = await Cart.findOne({ user: req.params.userId });
+    if (!cart) return next(createError('Cart not found', 404));
 
-  if (!carts[userId]) return next(createError('Cart not found', 404));
+    const item = cart.items.find(i => i.product.toString() === req.params.productId);
+    if (!item) return next(createError('Item not in cart', 404));
 
-  const index = carts[userId].findIndex(i => i.productId === productId);
-  if (index === -1) return next(createError('Item not in cart', 404));
+    if (Number(quantity) <= 0) {
+      cart.items = cart.items.filter(i => i.product.toString() !== req.params.productId);
+    } else {
+      item.quantity = Number(quantity);
+    }
 
-  if (parseInt(quantity) <= 0) {
-    carts[userId].splice(index, 1);
-  } else {
-    carts[userId][index].quantity = parseInt(quantity);
-  }
-
-  const total = carts[userId].reduce((s, i) => s + i.price * i.quantity, 0);
-  res.json({ success: true, data: carts[userId], total: parseFloat(total.toFixed(2)) });
+    await cart.save();
+    res.json({ success: true, data: cart });
+  } catch (err) { next(err); }
 });
 
-// ── DELETE /api/cart/:userId/:productId ───────────────────────────────────────
-router.delete('/:userId/:productId', (req, res, next) => {
-  const { userId, productId } = req.params;
+// DELETE /api/cart/:userId/:productId — remove one item
+router.delete('/:userId/:productId', async (req, res, next) => {
+  try {
+    const cart = await Cart.findOne({ user: req.params.userId });
+    if (!cart) return next(createError('Cart not found', 404));
 
-  if (!carts[userId]) return next(createError('Cart not found', 404));
-
-  const index = carts[userId].findIndex(i => i.productId === productId);
-  if (index === -1) return next(createError('Item not found in cart', 404));
-
-  carts[userId].splice(index, 1);
-  res.json({ success: true, message: 'Item removed from cart', data: carts[userId] });
+    cart.items = cart.items.filter(i => i.product.toString() !== req.params.productId);
+    await cart.save();
+    res.json({ success: true, data: cart });
+  } catch (err) { next(err); }
 });
 
-// ── DELETE /api/cart/:userId (Clear cart) ────────────────────────────────────
-router.delete('/:userId', (req, res) => {
-  carts[req.params.userId] = [];
-  res.json({ success: true, message: 'Cart cleared' });
+// DELETE /api/cart/:userId — clear entire cart
+router.delete('/:userId', async (req, res, next) => {
+  try {
+    const cart = await Cart.findOne({ user: req.params.userId });
+    if (!cart) return next(createError('Cart not found', 404));
+    cart.items = [];
+    await cart.save();
+    res.json({ success: true, message: 'Cart cleared' });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
